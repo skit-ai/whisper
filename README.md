@@ -1,10 +1,10 @@
 # Summary of Extensions of this Fork
 
-[ ] Implement Diverse Beam Search Decoder
-[x] Implement Nucleus Sampling
-[x] Implement top-k Sampling
-[x] Add support for N-best alternatives outputs. 
-[ ] Finetuning script on custom dataset
+- [ ] Implement Diverse Beam Search Decoder
+- [x] Implement Nucleus Sampling
+- [x] Implement top-k Sampling
+- [x] Add support for N-best alternatives outputs. 
+- [ ] Finetuning script on custom dataset
 
 # Whisper
 
