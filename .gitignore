@@ -9,3 +9,7 @@ thumbs.db
 .DS_Store
 .idea
 
+*.txt
+*.vtt
+build/
+dist/

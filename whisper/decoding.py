@@ -79,6 +79,7 @@ class DecodingOptions:
     best_of: Optional[int] = None     # number of independent samples to collect, when t > 0
     beam_size: Optional[int] = None   # number of beams in beam search, when t == 0
     patience: float = 0.0             # patience in beam search (https://arxiv.org/abs/2204.05424)
+    num_alternatives: Optional[int] = None             # Number of alternatives to return
 
     # options for ranking generations (either beams or best-of-N samples)
     length_penalty: Optional[float] = None   # "alpha" in Google NMT, None defaults to length norm
@@ -105,10 +106,10 @@ class DecodingResult:
     audio_features: Tensor
     language: str
     language_probs: Optional[Dict[str, float]] = None
-    tokens: List[int] = field(default_factory=list)
-    text: str = ""
-    avg_logprob: float = np.nan
-    no_speech_prob: float = np.nan
+    tokens: Union[List[int], List[List[int]]] = field(default_factory=list)
+    text: Union[str, List[str]] = ""
+    avg_logprob: Union[float, List[float]] = np.nan
+    no_speech_prob: Union[float, List[float]] = np.nan
     temperature: float = np.nan
     compression_ratio: float = np.nan
 
@@ -175,7 +176,7 @@ class MaximumLikelihoodRanker(SequenceRanker):
     def __init__(self, length_penalty: Optional[float]):
         self.length_penalty = length_penalty
 
-    def rank(self, tokens: List[List[Tensor]], sum_logprobs: List[List[float]]):
+    def rank(self, tokens: List[List[Tensor]], sum_logprobs: List[List[float]], N=None):
         def scores(logprobs, lengths):
             result = []
             for logprob, length in zip(logprobs, lengths):
@@ -189,8 +190,10 @@ class MaximumLikelihoodRanker(SequenceRanker):
 
         # get the sequence with the highest score
         lengths = [[len(t) for t in s] for s in tokens]
-        return [np.argmax(scores(p, l)) for p, l in zip(sum_logprobs, lengths)]
-
+        if N is None:
+            return [np.argmax(scores(p, l)) for p, l in zip(sum_logprobs, lengths)]
+        else:
+            return [np.argsort(scores(p, l))[-N::-1] for p, l in zip(sum_logprobs, lengths)]
 
 class TokenDecoder:
     def reset(self):
@@ -645,13 +648,15 @@ class DecodingTask:
             [t[self.sample_begin : (t == tokenizer.eot).nonzero()[0, 0]] for t in s] for s in tokens
         ]
 
-        # select the top-ranked sample in each group
-        selected = self.sequence_ranker.rank(tokens, sum_logprobs)
-        tokens: List[List[int]] = [t[i].tolist() for i, t in zip(selected, tokens)]
-        texts: List[str] = [tokenizer.decode(t).strip() for t in tokens]
+        # select the top-ranked samples in each group
+        assert(self.options.num_alternatives is not None)
+        selected = self.sequence_ranker.rank(tokens, sum_logprobs, N=self.options.num_alternatives)
 
-        sum_logprobs: List[float] = [lp[i] for i, lp in zip(selected, sum_logprobs)]
-        avg_logprobs: List[float] = [lp / (len(t) + 1) for t, lp in zip(tokens, sum_logprobs)]
+        tokens: List[List[List[int]]] = [[t[i].tolist() for i in n] for n, t in zip(selected, tokens)]
+        texts: List[List[str]] = [[tokenizer.decode(t).strip() for t in tn] for tn in tokens]
+
+        sum_logprobs: List[List[float]] = [[lp[i] for i in n] for n, lp in zip(selected, sum_logprobs)]
+        avg_logprobs: List[List[float]] = [[lp / (len(t) + 1) for (t, lp) in zip(tn, lp_n)] for tn, lp_n in zip(tokens, sum_logprobs)]
 
         fields = (texts, languages, tokens, audio_features, avg_logprobs, no_speech_probs)
         if len(set(map(len, fields))) != 1:
@@ -666,7 +671,7 @@ class DecodingTask:
                 avg_logprob=avg_logprob,
                 no_speech_prob=no_speech_prob,
                 temperature=self.options.temperature,
-                compression_ratio=compression_ratio(text),
+                compression_ratio=compression_ratio(text[0]),
             )
             for text, language, tokens, features, avg_logprob, no_speech_prob in zip(*fields)
         ]
