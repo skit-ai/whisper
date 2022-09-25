@@ -79,6 +79,7 @@ class DecodingOptions:
     best_of: Optional[int] = None     # number of independent samples to collect, when t > 0
     beam_size: Optional[int] = None   # number of beams in beam search, when t == 0
     patience: float = 0.0             # patience in beam search (https://arxiv.org/abs/2204.05424)
+    top_p: Optional[float] = 1.0      # Top-p for nucleus sampling
     num_alternatives: Optional[int] = None             # Number of alternatives to return
 
     # options for ranking generations (either beams or best-of-N samples)
@@ -249,17 +250,55 @@ class TokenDecoder:
         raise NotImplementedError
 
 
+def top_k_top_p_filtering(logits, top_k=0, top_p=0.0, filter_value=-float('Inf')):
+    """ Filter a distribution of logits using top-k and/or nucleus (top-p) filtering
+        Args:
+            logits: logits distribution shape (vocabulary size)
+            top_k >0: keep only top k tokens with highest probability (top-k filtering).
+            top_p >0.0: keep the top tokens with cumulative probability >= top_p (nucleus filtering).
+                Nucleus filtering is described in Holtzman et al. (http://arxiv.org/abs/1904.09751)
+        
+        Basic outline taken from https://gist.github.com/thomwolf/1a5a29f6962089e871b94cbd09daf317
+    """
+    assert logits.dim() == 2  # [BATCH_SIZE, VOCAB_SIZE]
+    top_k = min(top_k, logits.size(-1))  # Safety check
+    if top_k > 0:
+        # Remove all tokens with a probability less than the last token of the top-k
+        indices_to_remove = logits < torch.topk(logits, top_k, dim=1)[0][..., -1, None]
+        logits[indices_to_remove] = filter_value
+    
+    sorted_logits, sorted_indices = torch.sort(logits, descending=True)
+    
+    cumulative_probs = torch.cumsum(F.softmax(sorted_logits, dim=-1), dim=-1)
+    # Remove tokens with cumulative probability above the threshold
+    sorted_indices_to_remove = cumulative_probs > top_p
+    # Shift the indices to the right to keep also the first token above the threshold
+    sorted_indices_to_remove[..., 1:] = sorted_indices_to_remove[..., :-1].clone()
+    sorted_indices_to_remove[..., 0] = 0
+    
+    # Replace logits to be removed with -inf in the sorted_logits
+    sorted_logits[sorted_indices_to_remove] = filter_value
+    # Then reverse the sorting process by mapping back sorted_logits to their original position
+    logits = torch.gather(sorted_logits, 1, sorted_indices.argsort(-1))
+    
+    pred_token = torch.multinomial(F.softmax(logits, -1), 1).squeeze(1) # [BATCH_SIZE]
+    return pred_token
+
 class GreedyDecoder(TokenDecoder):
-    def __init__(self, temperature: float, eot: int):
+    def __init__(self, temperature: float, eot: int, top_p: float):
         self.temperature = temperature
         self.eot = eot
+        self.top_p = top_p
 
     def update(self, tokens: Tensor, logits: Tensor, sum_logprobs: Tensor) -> Tuple[Tensor, bool]:
         temperature = self.temperature
         if temperature == 0:
             next_tokens = logits.argmax(dim=-1)
         else:
-            next_tokens = Categorical(logits=logits / temperature).sample()
+            if self.top_p != 1.0:
+                next_tokens = top_k_top_p_filtering(logits=logits / temperature, top_p=self.top_p)
+            else:
+                next_tokens = Categorical(logits=logits / temperature).sample()
 
         logprobs = F.log_softmax(logits.float(), dim=-1)
         current_logprobs = logprobs[torch.arange(logprobs.shape[0]), next_tokens]
@@ -476,7 +515,7 @@ class DecodingTask:
                 options.beam_size, tokenizer.eot, self.inference, options.patience
             )
         else:
-            self.decoder = GreedyDecoder(options.temperature, tokenizer.eot)
+            self.decoder = GreedyDecoder(options.temperature, tokenizer.eot, options.top_p)
 
         # logit filters: applies various rules to suppress or penalize certain tokens
         self.logit_filters = []

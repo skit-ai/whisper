@@ -240,6 +240,7 @@ def cli():
     parser.add_argument("--language", type=str, default=None, choices=sorted(LANGUAGES.keys()) + sorted([k.title() for k in TO_LANGUAGE_CODE.keys()]), help="language spoken in the audio, specify None to perform language detection")
 
     parser.add_argument("--temperature", type=float, default=0, help="temperature to use for sampling")
+    parser.add_argument("--top_p", type=float, default=1.0, help="top_p for nucleus sampling")
     parser.add_argument("--num_alternatives", type=optional_int, default=10, help="number of beam search alternatives to return")
     parser.add_argument("--best_of", type=optional_int, default=5, help="number of candidates when sampling with non-zero temperature")
     parser.add_argument("--beam_size", type=optional_int, default=5, help="number of beams in beam search, only applicable when temperature is zero")
