@@ -126,20 +126,20 @@ def transcribe(
     time_precision = (
         input_stride * HOP_LENGTH / SAMPLE_RATE
     )  # time per output token: 0.02 (seconds)
-    all_tokens = []
-    all_segments = []
+    all_tokens = [[] for _ in range(decode_options["num_alternatives"])]
+    all_segments = [[] for _ in range(decode_options["num_alternatives"])]
     prompt_reset_since = 0
 
     def add_segment(
-        *, start: float, end: float, text_tokens: torch.Tensor, result: DecodingResult
+        *, start: float, end: float, text_tokens: torch.Tensor, result: DecodingResult, j: int
     ):
         text = tokenizer.decode([token for token in text_tokens if token < tokenizer.eot])
         if len(text.strip()) == 0:  # skip empty text output
             return
 
-        all_segments.append(
+        all_segments[j].append(
             {
-                "id": len(all_segments),
+                "id": len(all_segments[j]),
                 "seek": seek,
                 "start": start,
                 "end": end,
@@ -153,22 +153,22 @@ def transcribe(
         )
         if verbose:
             print(f"[{format_timestamp(start)} --> {format_timestamp(end)}] {text}")
-
     all_outputs = []
     while seek < mel.shape[-1]:
         timestamp_offset = float(seek * HOP_LENGTH / SAMPLE_RATE)
         segment = pad_or_trim(mel[:, :, seek:], N_FRAMES).to(model.device).to(dtype)
         segment_duration = segment.shape[-1] * HOP_LENGTH / SAMPLE_RATE
 
-        decode_options["prompt"] = all_tokens[prompt_reset_since:]
+        decode_options["prompt"] = all_tokens[0][prompt_reset_since:]
         result = decode_with_fallback(segment)[0]
         tokens_n = result.tokens
-        for tokens in tokens_n:
+        print(tokens_n, len(tokens_n))
+        for i, tokens in enumerate(tokens_n):
             tokens = torch.tensor(tokens)
             if no_speech_threshold is not None:
                 # no voice activity check
                 should_skip = result.no_speech_prob > no_speech_threshold
-                if logprob_threshold is not None and result.avg_logprob[0] > logprob_threshold:
+                if logprob_threshold is not None and result.avg_logprob[i] > logprob_threshold:
                     # don't skip if the logprob is high enough, despite the no_speech_prob
                     should_skip = False
 
@@ -193,13 +193,14 @@ def transcribe(
                         end=timestamp_offset + end_timestamp_position * time_precision,
                         text_tokens=sliced_tokens[1:-1],
                         result=result,
+                        j=i
                     )
                     last_slice = current_slice
                 last_timestamp_position = (
                     tokens[last_slice - 1].item() - tokenizer.timestamp_begin
                 )
                 seek += last_timestamp_position * input_stride
-                all_tokens.extend(tokens[: last_slice + 1].tolist())
+                all_tokens[i].extend(tokens[: last_slice + 1].tolist())
             else:
                 duration = segment_duration
                 timestamps = tokens[timestamp_tokens.nonzero().flatten()]
@@ -214,18 +215,19 @@ def transcribe(
                     end=timestamp_offset + duration,
                     text_tokens=tokens,
                     result=result,
+                    j=i
                 )
 
                 seek += segment.shape[-1]
-                all_tokens.extend(tokens.tolist())
+                all_tokens[i].extend(tokens.tolist())
 
             if result.temperature > 0.5:
                 # do not feed the prompt tokens if a high temperature was used
-                prompt_reset_since = len(all_tokens)
+                prompt_reset_since = len(all_tokens[i])
 
-        all_outputs.append(dict(text=tokenizer.decode(all_tokens), segments=all_segments, language=language))
-    temp = [{"text": item["text"], "logprob": item["avg_logprob"][i]} for i, item in enumerate(all_outputs[0]["segments"])]
-    return temp
+    all_outputs = [(dict(text=tokenizer.decode(all_tokens[i]), segments=all_segments[i], language=language)) for i in range(decode_options["num_alternatives"])]
+    # temp = [{"text": item["text"]} for item in all_outputs[0]["segments"]]
+    return all_outputs
 
 def cli():
     from . import available_models

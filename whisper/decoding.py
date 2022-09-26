@@ -194,7 +194,7 @@ class MaximumLikelihoodRanker(SequenceRanker):
         if N is None:
             return [np.argmax(scores(p, l)) for p, l in zip(sum_logprobs, lengths)]
         else:
-            return [np.argsort(scores(p, l))[-N::-1] for p, l in zip(sum_logprobs, lengths)]
+            return [np.argsort(scores(p, l))[-(N+1)::-1] for p, l in zip(sum_logprobs, lengths)]
 
 class TokenDecoder:
     def reset(self):
