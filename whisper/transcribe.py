@@ -162,7 +162,6 @@ def transcribe(
         decode_options["prompt"] = all_tokens[0][prompt_reset_since:]
         result = decode_with_fallback(segment)[0]
         tokens_n = result.tokens
-        print(tokens_n, len(tokens_n))
         for i, tokens in enumerate(tokens_n):
             tokens = torch.tensor(tokens)
             if no_speech_threshold is not None:
