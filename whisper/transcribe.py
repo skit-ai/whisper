@@ -224,7 +224,8 @@ def transcribe(
                 prompt_reset_since = len(all_tokens)
 
         all_outputs.append(dict(text=tokenizer.decode(all_tokens), segments=all_segments, language=language))
-    return all_outputs
+    temp = [{"text": item["text"], "logprob": item["avg_logprob"][i]} for i, item in enumerate(all_outputs[0]["segments"])]
+    return temp
 
 def cli():
     from . import available_models
