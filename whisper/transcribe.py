@@ -162,6 +162,7 @@ def transcribe(
         decode_options["prompt"] = all_tokens[0][prompt_reset_since:]
         result = decode_with_fallback(segment)[0]
         tokens_n = result.tokens
+
         for i, tokens in enumerate(tokens_n):
             tokens = torch.tensor(tokens)
             if no_speech_threshold is not None:
@@ -224,7 +225,7 @@ def transcribe(
                 # do not feed the prompt tokens if a high temperature was used
                 prompt_reset_since = len(all_tokens[i])
 
-    all_outputs = [(dict(text=tokenizer.decode(all_tokens[i]), segments=all_segments[i], language=language)) for i in range(decode_options["num_alternatives"])]
+    all_outputs = [dict(text=tokenizer.decode(all_tokens[i]), segments=all_segments[i], language=language) for i in range(decode_options["num_alternatives"])]
     # temp = [{"text": item["text"]} for item in all_outputs[0]["segments"]]
     return all_outputs
 

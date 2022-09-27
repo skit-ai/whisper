@@ -167,7 +167,13 @@ class SequenceRanker:
         """
         raise NotImplementedError
 
-
+def get_highest_n(scores, N):
+    num_alternatives = len(scores[0])
+    if num_alternatives == N:
+        return [score[::-1] for score in scores]
+    else:
+        return [score[::-1][:N-1] for score in scores]
+        
 class MaximumLikelihoodRanker(SequenceRanker):
     """
     Select the sample with the highest log probabilities, penalized using either
@@ -194,7 +200,7 @@ class MaximumLikelihoodRanker(SequenceRanker):
         if N is None:
             return [np.argmax(scores(p, l)) for p, l in zip(sum_logprobs, lengths)]
         else:
-            return [np.argsort(scores(p, l))[-(N+1)::-1] for p, l in zip(sum_logprobs, lengths)]
+            return get_highest_n([np.argsort(scores(p, l)) for p, l in zip(sum_logprobs, lengths)], N)
 
 class TokenDecoder:
     def reset(self):
@@ -700,7 +706,6 @@ class DecodingTask:
         fields = (texts, languages, tokens, audio_features, avg_logprobs, no_speech_probs)
         if len(set(map(len, fields))) != 1:
             raise RuntimeError(f"inconsistent result lengths: {list(map(len, fields))}")
-
         return [
             DecodingResult(
                 audio_features=features,
